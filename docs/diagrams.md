@@ -280,6 +280,61 @@ gantt
 
 ---
 
+---
+
+## 6. Observability Architecture
+
+How OpenTelemetry signals flow from each instrumented component through the Collector to Jaeger (dev) and Azure Monitor (production). See ADR-0008.
+
+```mermaid
+flowchart LR
+    subgraph App["Application (Docker Compose)"]
+        direction TB
+        FW["FastAPI\n(OTLP auto-instrumentation\nHTTP · WebSocket · SQLAlchemy)"]
+        Pool["CopilotClient Pool\n(manual spans:\npool.checkout · pool.active)"]
+        CLI["Copilot CLI Bridge\n(manual spans:\ncopilot.session.turn\ncopilot.tokens.input/output)"]
+        MCP["MCP Tool Events\n(manual child spans:\nmcp.tool.call · duration)"]
+        PG["PostgreSQL\n(auto-instrumented\nvia SQLAlchemy)"]
+    end
+
+    subgraph OTel["Observability Pipeline"]
+        Collector["OTel Collector\n─────────────\nReceiver: OTLP gRPC :4317\nReceiver: OTLP HTTP :4318\nProcessor: batch\nExporter: jaeger\nExporter: prometheus"]
+    end
+
+    subgraph Backends["Backends"]
+        Jaeger["Jaeger\n(all-in-one)\nUI :16686\nDev only — in-memory"]
+        Prom["Prometheus\n(scrapes Collector\n:8888/metrics)"]
+        AM["Azure Monitor\n(Application Insights)\nProduction only\nvia azuremonitor exporter"]
+    end
+
+    FW -- "OTLP gRPC\ntraces · metrics · logs" --> Collector
+    Pool -- "OTLP gRPC" --> Collector
+    CLI -- "OTLP gRPC" --> Collector
+    MCP -- "OTLP gRPC" --> Collector
+    PG -- "OTLP gRPC" --> Collector
+
+    Collector -- "OTLP (traces)" --> Jaeger
+    Collector -- "Prometheus scrape\n(metrics)" --> Prom
+    Collector -- "azuremonitor\nexporter (prod)" --> AM
+
+    FW -. "trace_id injected\ninto log records" .-> CLI
+    CLI -. "trace context\npropagated via\nlog correlation" .-> MCP
+```
+
+**Key instrumented spans:**
+
+| Span | Parent | Key Attributes |
+|---|---|---|
+| `http.server` / `websocket` | root | `http.method`, `http.route`, `user.id` |
+| `chat.turn` | websocket | `session.id`, `workflow.type` |
+| `pool.checkout` | chat.turn | `pool.wait_ms`, `pool.size` |
+| `copilot.session.turn` | pool.checkout | `copilot.model`, `tokens.input`, `tokens.output` |
+| `mcp.tool.call` | copilot.session.turn | `tool.name`, `ado.project`, `duration_ms` |
+| `report.generate` | chat.turn | `report.type`, `report.size_bytes` |
+| `db.query` | (any) | Auto — table, operation, duration |
+
+---
+
 ## Diagram Index
 
 | # | Diagram | Type | Key Insight |
@@ -289,3 +344,4 @@ gantt
 | 3 | Request Flow | Sequence | WebSocket chat turn with tool invocation loop and optional report persistence |
 | 4 | Skills Architecture | Flowchart | Dynamic skill loading based on detected workflow; skills are loaded into `system_message` |
 | 5 | Phased Delivery | Gantt | 26-week roadmap; Phase 1 PPTX spike gates Phase 2 approach |
+| 6 | Observability Architecture | Flowchart | OTel signals → Collector → Jaeger (dev) / Azure Monitor (prod); key span inventory |

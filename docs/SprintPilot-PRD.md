@@ -436,7 +436,8 @@ The full-stack-fastapi-template provides a working application with users, items
 | `frontend/src/components/` | Add `Chat/`, `WorkItemPreview/`, `FileDownload/`, `ReportPreview/` component directories |
 | `frontend/src/client/` | Extend auto-generated API client with WebSocket hooks |
 | `.env` | Add `ADO_PAT`, `ADO_ORG_NAME`, `COPILOT_MODEL`, `COPILOT_POOL_SIZE` variables |
-| `compose.yml` | Ensure Node.js 18+ available for Copilot CLI + MCP server processes |
+| `compose.yml` | Ensure Node.js 18+ available for Copilot CLI + MCP server processes; add `otel-collector` and `jaeger` services (see ADR-0008) |
+| `otel-collector-config.yaml` | OTel Collector pipeline: OTLP receiver → batch processor → Jaeger exporter + Prometheus metrics exporter |
 | `/skills` | New top-level directory: `pptx/`, `docx/`, `sprint-review/`, `sprint-readiness/`, `work-item-decomposition/`, `test-plan/`, `development/` (see §6.4) |
 | `/docs` | New top-level directory: `decisions/` for ADRs, `contracts/` for API contract documentation and WebSocket protocol spec (see §6.9) |
 
@@ -615,8 +616,10 @@ The Copilot CLI authenticates using the host machine's GitHub credentials (or a 
 | **Compliance** | FERPA considerations | No student PII processed; tool is staff-only |
 | **Scalability** | Concurrent users | Up to 30 concurrent sessions via pooled CopilotClient (pool of 3–5); average ~3 |
 | **Scalability** | Report storage | PostgreSQL bytea; 20MB per-file limit; indefinite retention with future pruning |
-| **Observability** | Logging | Structured logs for all MCP tool invocations and agent events |
-| **Observability** | Metrics | Token usage, tool call frequency, session duration, error rates |
+| **Observability** | Tracing | Distributed traces across the full request path (FastAPI → CopilotClient pool → Copilot CLI → ADO MCP Server) via **OpenTelemetry**; visualized in **Jaeger** (see ADR-0008) |
+| **Observability** | Logging | Structured logs for all MCP tool invocations and agent events; `trace_id` injected into every log record via `opentelemetry-instrumentation-logging` |
+| **Observability** | Metrics | Token usage (`copilot.tokens.input/output`), tool call frequency, pool utilization, session duration, error rates; collected via **OpenTelemetry Collector** |
+| **Observability** | Infrastructure | OTel Collector + Jaeger run alongside the application in Docker Compose (dev) and export to Azure Monitor in production — no code changes required to switch backends |
 | **Accessibility** | WCAG 2.1 AA | Chat interface meets accessibility standards |
 
 ---
